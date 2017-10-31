@@ -1,0 +1,169 @@
+% Bas van Niftrik, Jorn Fierstra, Marco Piccirelli
+% Department of Neurosurgery, UniversitätsSpital Zürich
+% Frauenklinikstrasse 10
+% 8091 Zürich, die Schweiz
+ 
+%% Script details 
+% This script is written to calculate fMRI and CVR in a predetermined area 
+% of the brain (here the left and right hand area of the % brain located in 
+% the precentral motor cortex based on work by Yousry et % al 1997, Brain 2017
+ 
+%% Script requirements
+% SPM Version 8-12
+% Created CVR map
+% task-based BOLD fMRI volumes
+% Segmented grey and white matter masks from a T1 image
+% A left and right hemishpere mask
+ 
+%% determine the patients directory
+cd(spm_select(1, 'dir', 'select directory for created images')) % select directory for the created images 
+ 
+%% read parameters
+handleft = spm_read_vols(spm_vol(spm_select(1, 'image', 'select left hand area')));
+handright = spm_read_vols(spm_vol(spm_select(1, 'image', 'select right hand area')));
+BOLD = spm_read_vols(spm_vol(spm_select(inf, 'image', 'Tmap')));
+% tmap = spm_read_vols(spm_vol(spm_select(1, 'image', 'Tmap')));
+C = spm_select(1, 'image', 'CVR map');
+CVR = spm_read_vols(spm_vol(C));
+greymask = spm_read_vols(spm_vol(spm_select(1, 'image', 'select grey matter')));
+whitemask = spm_read_vols(spm_vol(spm_select(1, 'image', 'select white matter')));
+hemleft = spm_read_vols(spm_vol(spm_select(1, 'image', 'select left hemisphere')));
+hemright = spm_read_vols(spm_vol(spm_select(1, 'image', 'select right hemisphere')));
+ 
+%% Create a conjunctionmap (combined grey and white matter mask)
+NrScans = size(BOLD,4);
+athreshold = 0.8;
+conjunctiongreywhite = conjunctiongw(greymask, whitemask, athreshold);
+ 
+%% grey masking
+grey = greymask>=0.7; % only include voxels with a probability > 0.7
+grey =(double(grey));
+grey(grey == 0 ) = NaN;
+ 
+%% % task-based BOLD fMRI signal changes calculations
+% create a boxplot based on the paradigm of your protocol (here 10:20:70)
+b1 = zeros(10,1)';
+s1 = ones(10,1)';
+b2 = zeros(10,1)';
+s2 = ones(10,1)';
+b3 = zeros(10,1)';
+s3 = ones(10,1)';
+b4 = zeros(10,1)';
+s4 = ones(10,1)';
+b5 = zeros(10,1)';
+    
+CO2 = [b1 s1 b2 s2 b3 s3 b4 s4 b5];
+   
+   
+% Set the parameter values of the hrf  (here: defaukt SPM settings)
+ 
+RT = 3;
+pp   = [6 16 1 1 6 0 32];
+T = 1;
+[hrf,~] = spm_hrf(RT,pp,T);
+% convole Block paradigm with HRF
+CO5=conv(CO2,hrf);
+CO6 = CO5(1:90);
+figure(16);
+plot(CO6);
+ 
+ 
+%% Create the percent signal change maps for the convolved BOLD fMRI volumes
+MtxSizeX = size(BOLD,1);
+MtxSizeY = size(BOLD,2);
+MtxSizeZ = size(BOLD,3);
+CVReactivity = zeros(MtxSizeX, MtxSizeY, MtxSizeZ);
+for t = 1:size(BOLD,4);
+    cBOLD(:,:,:,t) = BOLD(:,:,:,t).*conjunctiongreywhite;
+end
+cBOLD(cBOLD == 0) = NaN;
+parfor ix = 1:MtxSizeX
+    for iy = 1:MtxSizeY
+        for iz = 1:MtxSizeZ;
+            fData = squeeze(cBOLD(ix,iy,iz,:));
+            if ~isnan(fData)
+                UsableShiftedCO2Voxel = squeeze(CO6)';              
+                fMRI = polyfit(UsableShiftedCO2Voxel, fData, 1);
+                fMRI1 = (fMRI(1)/fMRI(2))*100;
+                CVRreact = fMRI1;
+            else
+                CVRreact = NaN;
+            end
+            CVReactivity(ix,iy,iz) = CVRreact;
+        end
+    end
+end
+ 
+%% calculate CVR and BOLD fMRI signal change in Hand Area in the grey matter left
+ 
+hemleftb = double(hemleft>=0.8);
+DTPleft =  DTP.*hemleftb.*conjunctiongreywhite;
+DTPleft(DTPleft == 0) = NaN;
+meanDTPleft = nanmean(nanmean(nanmean(DTPleft)));
+display(meanDTPleft)
+ 
+ 
+hemrightb = double(hemright>=0.8);
+DTPright =  DTP.*hemrightb.*conjunctiongreywhite;
+DTPright(DTPright == 0) = NaN;
+meanDTPright = nanmean(nanmean(nanmean(DTPright)));
+display(meanDTPright)
+ 
+Handleft = handleft>= 0.7;
+Handleft = double(Handleft);
+greyhandleft = Handleft.*grey;
+ 
+fMRIhandleft = CVReactivity.*greyhandleft;
+fMRIhandleft(fMRIhandleft==0) = NaN;
+meanfMRIhandleft = nanmean(nanmean(nanmean(fMRIhandleft)));
+ 
+CVRhandleft = CVR.*greyhandleft;
+CVRhandleft(CVRhandleft==0) = NaN;
+ 
+meanCVRhandleft = nanmean(nanmean(nanmean(CVRhandleft)));
+display(meanCVRhandleft);
+display(meanfMRIhandleft);
+ 
+meanBOLDleft = 1:size(BOLD,4);
+for t = 1:size(BOLD,4)
+    BOLDc = cBOLD(:,:,:,t).*greyhandleft;
+    BOLDc(BOLDc == 0) = NaN;
+    meanBOLDleft(t) = nanmean(nanmean(nanmean(BOLDc)));
+end
+figure(98); plotyy(1:size(BOLD,4),meanBOLDleft,1:size(BOLD,4),CO6)
+ 
+ 
+ 
+%% calculate CVR and BOLD fMRI signal change in Hand Area in the grey matter right
+Handright = handright>= 0.7;
+Handright = double(Handright);
+greyhandright = Handright.*grey;
+ 
+fMRIhandright = CVReactivity.*greyhandright;
+fMRIhandright(fMRIhandright==0) = NaN;
+meanfMRIhandright = nanmean(nanmean(nanmean(fMRIhandright)));
+ 
+CVRhandright = CVR.*greyhandright;
+CVRhandright(CVRhandright==0) = NaN;
+ 
+meanCVRhandright = nanmean(nanmean(nanmean(CVRhandright)));
+display(meanCVRhandright);
+display(meanfMRIhandright);
+ 
+meanBOLDright = 1:size(BOLD,4);
+for t = 1:size(BOLD,4)
+    BOLDc = cBOLD(:,:,:,t).*greyhandright;
+    BOLDc(BOLDc == 0) = NaN;
+    meanBOLDright(t) = nanmean(nanmean(nanmean(BOLDc)));
+end
+figure(99); plotyy(1:size(BOLD,4),meanBOLDright,1:size(BOLD,4), CO6)
+ 
+%% create a personlaized map using SPM Software
+ 
+FMRIDATA = spm_vol(C);
+W = FMRIDATA(1,1);
+W.fname = 'fMRIact.nii';
+W.private.dat.fname = W.fname;
+spm_write_vol(W,CVReactivity);
+ 
+end
